@@ -36,11 +36,32 @@ To stop minikube:
 minikube stop
 ```
 
-__Note:__ The kubernetes command line interface, `kubectl`, comes directly with minikube, no needs to install it separately.
+Also, we need to install the Kubernetes command line interface to interact witj our cluster.
 
-## __Create a Namespace__
+MacOS
+```
+curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/darwin/amd64/kubectl"
 
-#### Why should I create a namespace ?
+chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
+```
+
+Windows (v1.18.0)
+```
+curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.18.0/bin/windows/amd64/kubectl.exe
+
+Add binary to your PATH
+```
+
+Linux
+```
+curl -LO https://storage.googleapis.com/kubernetes-release/release/`curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt`/bin/linux/amd64/kubectl
+
+chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
+```
+
+## __Create Namespace__
+
+#### Why should I need a namespace ?
 
 Namespaces allow an isolation in the cluster, we definitely want one on our CI/CD environment. To do so:
 ```sh
@@ -67,7 +88,6 @@ metadata:
   labels:
     type: local
 spec:
-  storageClassName: manual
   capacity:
     storage: 5Gi
   accessModes:
@@ -86,9 +106,9 @@ metadata:
   name: jenkins-pvc
   namespace: jenkins
 spec:
+  storageClassName: standard
   accessModes:
     - ReadWriteOnce
-  storageClassName: manual
   resources:
     requests:
       storage: 5Gi
@@ -113,6 +133,123 @@ NAME          STATUS   VOLUME       CAPACITY   ACCESS MODES   STORAGECLASS   AGE
 jenkins-pvc   Bound    jenkins-pv   5Gi        RWO            manual         2m
 ```
 
-Indeed, our PV and PVC are bound together.
+Perfect, our PV and PVC are bound together.
 
-## __Create a Jenkins Deployment__
+__Note :__ Minikube come with something call [`Dynamic provisiong and CSI`](https://minikube.sigs.k8s.io/docs/reference/persistent_volumes/). It will create for us a PV based on the PVC with declare so with minikube we don't really need to create the PV yaml. As this feature is only on minikube and on real cluster you will need to create the PV, we are creating it.
+
+## __Create Jenkins Deployment__
+
+Finally we are starting to deploy our jenkins on top of the cluster. The deployment file look like:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jenkins
+  namespace: jenkins
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jenkins
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      containers:
+        - name: jenkins
+          image: jenkins/jenkins
+          ports:
+            - name: http-ui
+              containerPort: 8080
+          volumeMounts:
+            - name: jenkins-home
+              mountPath: /var/jenkins_home
+      volumes:
+        - name: jenkins-home
+          persistentVolumeClaim:
+            claimName: jenkins-pvc
+```
+As we are in local cluster, we will have only one pod based on the official jenkins' image. As jenkins have its configuration in `/var/jenkins_home` we are mounting our volume on that path. For further information about k8s deployment, you can refer to the [official documentation](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+
+Now we apply our deployment:
+```sh
+kubectl apply -f jenkins-deployment.yaml
+```
+
+Let's check if everything is alright with our deployment, you should see the pod in a `running` status.
+```sh
+kubectl get pods -n jenkins
+```
+
+## __Create Service__
+
+#### I alreday have my deployment, why should I need to a service ?
+
+Currently, our jenkins is not accessible to the outside world only within the cluster. Not really useful righ ?
+So, for accessing the jenkins container from outside world, we should create a service and map it to the deployment.  
+More details about service [here](https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types)
+
+Our service looks like:
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins
+  namespace: jenkins
+spec:
+  type: NodePort
+  selector:
+    app: jenkins
+  ports:
+    - name: http-ui
+      port: 8080
+      targetPort: 8080
+      nodePort: 30000
+```
+
+In this, we are using the type `NodePort` which will expose jenkins on all kubernetes node IP's on port `30000`.
+
+Let's create it:
+```sh
+kubectl apply -f jenkins-services.yaml
+
+// Get NodeIp
+kubectl get node -o wide
+```
+
+We can acces it by requesting `http://<NodeIP>:30000`
+
+## __Access Jenkins__
+
+Jenkins will ask for initial Admin password, which you can get from the pod logs.
+
+![](/assets/jenkins-lock.png)
+
+```sh
+kubectl logs <PodName> -n jenkins
+
+...
+*************************************************************
+*************************************************************
+*************************************************************
+
+Jenkins initial setup is required. An admin user has been created and a password generated.
+Please use the following password to proceed to installation:
+
+47a41b5b68b42e39247479d8b9a0c69
+
+This may also be found at: /var/jenkins_home/secrets/initialAdminPassword
+
+*************************************************************
+*************************************************************
+*************************************************************
+...
+```
+
+Then install the recommanded plugins and create your admin user.  
+You can now start using jenkins and create your pipeline.
+
+![](/assets/jenkins.png)
+
+## __To infinity and beyond ...__
