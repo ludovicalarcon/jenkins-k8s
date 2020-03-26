@@ -135,7 +135,7 @@ jenkins-pvc   Bound    jenkins-pv   5Gi        RWO            manual         2m
 
 Perfect, our PV and PVC are bound together.
 
-__Note :__ Minikube come with something call [`Dynamic provisiong and CSI`](https://minikube.sigs.k8s.io/docs/reference/persistent_volumes/). It will create for us a PV based on the PVC with declare so with minikube we don't really need to create the PV yaml. As this feature is only on minikube and on real cluster you will need to create the PV, we are creating it.
+__Note :__ Minikube come with something call [Dynamic provisiong and CSI](https://minikube.sigs.k8s.io/docs/reference/persistent_volumes/). It will create for us a PV based on the PVC with declare so with minikube we don't really need to create the PV yaml. As this feature is only on minikube and on real cluster you will need to create the PV, we are creating it.
 
 ## __Create Jenkins Deployment__
 
@@ -253,3 +253,201 @@ You can now start using jenkins and create your pipeline.
 ![](/assets/jenkins.png)
 
 ## __To infinity and beyond ...__
+
+### __Scaling__
+
+In order to use all the power offers by k8s, we could want a scalable Jenkins.  
+One of the strongest sides of Jenkins is that it has a scaling feature almost out-of-the-box. Jenkins scaling is based on the master/slaves model, where you have a number of agent instances (called slaves) and one main Jenkins instance (called master), which is responsible mainly for distributing jobs across slaves.
+
+Sounds good right?
+
+There are plenty of options available to implement Jenkins scaling, we will focus on the [Kubernetes plugin](https://github.com/jenkinsci/kubernetes-plugin).
+It allows to run dynamic agents in a Kubernetes cluster by creating a Kubernetes Pod for each agent started.  
+It give us a lots of benefits:
+  - Ability to run many more build
+  - Automatically spinning up and removing slaves based on need, which saves costs
+  - Distributing the load across different physical machines while keeping required resources available for each specific build
+
+On your Jenkins web ui select and install the kubernetes plugin:
+```
+Manage Jenkins |> Manage Plugins |> Available |> Kubernetes
+```
+
+Now it’s time to configure the plugin:
+```
+Manage Jenkins |> Manage Nodes and Clouds |> Configure Clouds |> Add a new cloud |> Kubernetes |> Kubernetes Cloud details...
+```
+
+![](/assets/k8s-plugin.png)
+
+We need several things for the configuration:
+  - Cluster URL
+  - Cluster credential
+  - Jenkins URL
+
+In order to connect to the cluster we should have some credential (like your kubectl context).We will use a `X.509 Client Certificate` secret type. To add a new secret, go to:
+```
+Credentials |> global |> Add Credentials
+```
+Select `X.509 Client Certificate` under the `Kind` dropdown.  
+To get the client key, client certificate and Server CA Certificate, we could do:
+```sh
+cat ~/.minikube/client.key
+cat ~/.minikube/client.crt
+cat ~/.minikube/ca.crt
+```
+Then add `minikube` as ID and a description.
+
+![](/assets/jenkins-secret.png)
+
+The following will give us the cluster url, that will indicate in the `Kubernetes URL` field.
+```sh
+kubectl cluster-info | grep master
+```
+
+After fill out our kubernetes url and our minikube credential, the connection test should be successful.
+
+We can see, that the configuration want to default the jenkins url with `http://<NodeIP>:30000` but we want use the node url because the plugin will connect to the master inside the cluster using the port `5000`.
+So, we have to modify three things in our cluster:  
+- First, we want our deployment to expose port `5000` and apply it. As we persist the `jenkins_home` folder, there is no worry about deploying a new deployment.
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jenkins
+  namespace: jenkins
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jenkins
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      containers:
+        - name: jenkins
+          image: jenkins/jenkins
+          ports:
+            - name: http-ui
+              containerPort: 8080
+            - name: jnlp
+              containerPort: 5000
+          volumeMounts:
+            - name: jenkins-home
+              mountPath: /var/jenkins_home
+      volumes:
+        - name: jenkins-home
+          persistentVolumeClaim:
+            claimName: jenkins-pvc
+```
+```sh
+kubectl apply -f jenkins-deployment.yaml
+```
+- Secondly, we want a resilient configuration, that means we don't want give directly the NodeIP as it can change. We also need to be able to communicate on port `5000` within our cluster. So, Let's create a service of type `ClusterIP` and expose both port `8080` and `5000`.
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins-cip
+  namespace: jenkins
+spec:
+  type: ClusterIP
+  selector:
+    app: jenkins
+  ports:
+  - name: master
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: jnlp
+    port: 5000
+    targetPort: 5000
+    protocol: TCP
+```
+```sh
+kubectl apply -f jenkins-services.yaml
+```
+
+ - Finally, we want another persistent volume for our jenkins workspace (the folder where jenkins magic happens).
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: jenkins-workspace-pv
+  namespace: jenkins
+  labels:
+    type: local
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  hostPath:
+    path: "/data/jenkins-data"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jenkins-workspace-pvc
+  namespace: jenkins
+spec:
+  storageClassName: standard
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+```
+```sh
+kubectl apply -f jenkins-volumes.yaml
+```
+
+We can now fill out the jenkins url with `http://ClusterIP:8080`, to get the ClusterIP part:
+```sh
+kubectl get svc -n jenkins
+```
+
+Then let's add a pod template and fill it out as the following:
+![](/assets/pod-template.png)
+![](/assets/pod-template-next.png)
+
+We are finnaly ready to try out the plugin.  
+Let's create and name our pipeline:
+```
+New Item |> Pipeline
+```
+
+In the pipeline section we will put the following:
+```groovy
+podTemplate(inheritFrom: 'jnlp-pod', containers: [
+    containerTemplate(name: 'nginx', image: 'nginx', ttyEnabled: true, command: 'cat')
+  ]) {
+
+    node(POD_LABEL) {
+
+        stage('cat nginx html')
+        {
+            container('nginx') {
+                sh ```
+                echo "--- Cat nginx html ---"
+                cat "/usr/share/nginx/html/index.html"
+                ```
+            }
+        }
+    }
+}
+```
+
+### __Automation__
+
+The best way to install the jenkins master with our custom plugin is to create a docker image based on the official base image. Having your Jenkins setup as a dockerfile is highly recommended to make your continuous integration infrastructure replicable and have it ready for setup from scratch. To install plugins on the dockerfile:
+
+```Dockerfile
+FROM jenkins/jenkins
+
+...
+RUN /usr/local/bin/install-plugins.sh kubernetes
+...
+```
