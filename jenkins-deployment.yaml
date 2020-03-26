@@ -19,6 +19,8 @@ spec:
           ports:
             - name: http-ui
               containerPort: 8080
+            - name: jnlp
+              containerPort: 50000
           volumeMounts:
             - name: jenkins-home
               mountPath: /var/jenkins_home
