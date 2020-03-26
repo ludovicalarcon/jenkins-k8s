@@ -278,7 +278,7 @@ Now it’s time to configure the plugin:
 Manage Jenkins |> Manage Nodes and Clouds |> Configure Clouds |> Add a new cloud |> Kubernetes |> Kubernetes Cloud details...
 ```
 
-![](/assets/k8s-plugin.png)
+![](/assets/k8s-details.png)
 
 We need several things for the configuration:
   - Cluster URL
@@ -307,9 +307,9 @@ kubectl cluster-info | grep master
 
 After fill out our kubernetes url and our minikube credential, the connection test should be successful.
 
-We can see, that the configuration want to default the jenkins url with `http://<NodeIP>:30000` but we want use the node url because the plugin will connect to the master inside the cluster using the port `5000`.
+We can see, that the configuration want to default the jenkins url with `http://<NodeIP>:30000` but we want use the node url because the plugin will connect to the master inside the cluster using the port `50000`.
 So, we have to modify three things in our cluster:  
-- First, we want our deployment to expose port `5000` and apply it. As we persist the `jenkins_home` folder, there is no worry about deploying a new deployment.
+- First, we want our deployment to expose port `50000` and apply it. As we persist the `jenkins_home` folder, there is no worry about deploying a new deployment.
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -333,7 +333,7 @@ spec:
             - name: http-ui
               containerPort: 8080
             - name: jnlp
-              containerPort: 5000
+              containerPort: 50000
           volumeMounts:
             - name: jenkins-home
               mountPath: /var/jenkins_home
@@ -345,7 +345,7 @@ spec:
 ```sh
 kubectl apply -f jenkins-deployment.yaml
 ```
-- Secondly, we want a resilient configuration, that means we don't want give directly the NodeIP as it can change. We also need to be able to communicate on port `5000` within our cluster. So, Let's create a service of type `ClusterIP` and expose both port `8080` and `5000`.
+- Secondly, we want a resilient configuration, that means we don't want give directly the NodeIP as it can change. We also need to be able to communicate on port `50000` within our cluster. So, Let's create a service of type `ClusterIP` and expose both port `8080` and `50000`.
 ```yaml
 apiVersion: v1
 kind: Service
@@ -362,8 +362,8 @@ spec:
     targetPort: 8080
     protocol: TCP
   - name: jnlp
-    port: 5000
-    targetPort: 5000
+    port: 50000
+    targetPort: 50000
     protocol: TCP
 ```
 ```sh
@@ -430,10 +430,10 @@ podTemplate(inheritFrom: 'jnlp-pod', containers: [
         stage('cat nginx html')
         {
             container('nginx') {
-                sh ```
+                sh """
                 echo "--- Cat nginx html ---"
                 cat "/usr/share/nginx/html/index.html"
-                ```
+                """
             }
         }
     }
