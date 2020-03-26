@@ -36,7 +36,7 @@ To stop minikube:
 minikube stop
 ```
 
-Also, we need to install the Kubernetes command line interface to interact witj our cluster.
+Also, we need to install the Kubernetes command line interface to interact with our cluster.
 
 MacOS
 ```
@@ -63,12 +63,12 @@ chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
 
 #### Why should I need a namespace ?
 
-Namespaces allow an isolation in the cluster, we definitely want one on our CI/CD environment. To do so:
+Namespaces allow an isolation in the cluster. We definitely want one on our CI/CD environment. To do so:
 ```sh
 kubectl create ns jenkins
 ```
 
-Now that we have our namespace, we can start thinking about the deployment.
+Now that we have our namespace, we can proceed with persistency.
 
 ## __Persistent Volume and Persistent Volume Claim__
 
@@ -95,9 +95,9 @@ spec:
   hostPath:
     path: "/data/jenkins-data"
 ```
-__Note:__ Minikube is configured to persist files stored under some directories ([list here](https://minikube.sigs.k8s.io/docs/reference/persistent_volumes/)) and `data` is one on them. Change the `path` according your setup.
+__Note:__ Minikube is configured to persist files stored under some directories ([list here](https://minikube.sigs.k8s.io/docs/reference/persistent_volumes/)), `data` is one on them. Change the `path` according your setup.
 
-To request physical storage we need a PersistentVolumeClaim, here is the configuration:
+To request physical storage, we need a PersistentVolumeClaim, here is the configuration:
 
 ```yaml
 apiVersion: v1
@@ -135,11 +135,11 @@ jenkins-pvc   Bound    jenkins-pv   5Gi        RWO            manual         2m
 
 Perfect, our PV and PVC are bound together.
 
-__Note :__ Minikube come with something call [Dynamic provisiong and CSI](https://minikube.sigs.k8s.io/docs/reference/persistent_volumes/). It will create for us a PV based on the PVC with declare so with minikube we don't really need to create the PV yaml. As this feature is only on minikube and on real cluster you will need to create the PV, we are creating it.
+__Note :__ Minikube come with something call [Dynamic provisiong and CSI](https://minikube.sigs.k8s.io/docs/reference/persistent_volumes/). It will create for us a PV based on the PVC we have declared, so with minikube we don't really need to create the PV yaml. As this feature is only on minikube and on real cluster you will need to create the PV, we are creating it.
 
 ## __Create Jenkins Deployment__
 
-Finally we are starting to deploy our jenkins on top of the cluster. The deployment file look like:
+Finally, we are starting to deploy our jenkins on top of the cluster. The deployment file look like:
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -170,7 +170,8 @@ spec:
           persistentVolumeClaim:
             claimName: jenkins-pvc
 ```
-As we are in local cluster, we will have only one pod based on the official jenkins' image. As jenkins have its configuration in `/var/jenkins_home` we are mounting our volume on that path. For further information about k8s deployment, you can refer to the [official documentation](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+As we are in a local cluster, we will have only one pod based on the official jenkins' image.  
+Jenkins has its configuration in `/var/jenkins_home`, that why, we are mounting our volume on that path. For further information about k8s deployment, you can refer to the [official documentation](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
 
 Now we apply our deployment:
 ```sh
@@ -247,8 +248,8 @@ This may also be found at: /var/jenkins_home/secrets/initialAdminPassword
 ...
 ```
 
-Then install the recommanded plugins and create your admin user.  
-You can now start using jenkins and create your pipeline.
+Then install the recommended plugins and create your admin user.  
+You can now start using jenkins and create your first pipeline.
 
 ![](/assets/jenkins.png)
 
@@ -273,7 +274,7 @@ On your Jenkins web ui select and install the kubernetes plugin:
 Manage Jenkins |> Manage Plugins |> Available |> Kubernetes
 ```
 
-Now it’s time to configure the plugin:
+Now, it’s time to configure the plugin:
 ```
 Manage Jenkins |> Manage Nodes and Clouds |> Configure Clouds |> Add a new cloud |> Kubernetes |> Kubernetes Cloud details...
 ```
@@ -285,12 +286,12 @@ We need several things for the configuration:
   - Cluster credential
   - Jenkins URL
 
-In order to connect to the cluster we should have some credential (like your kubectl context).We will use a `X.509 Client Certificate` secret type. To add a new secret, go to:
+In order to connect to the cluster, we should have some credential (like your kubectl context).We will use a `X.509 Client Certificate` secret type. To add a new secret, go to:
 ```
 Credentials |> global |> Add Credentials
 ```
 Select `X.509 Client Certificate` under the `Kind` dropdown.  
-To get the client key, client certificate and Server CA Certificate, we could do:
+To get the client key, client certificate and Server CA Certificate, we can do:
 ```sh
 cat ~/.minikube/client.key
 cat ~/.minikube/client.crt
@@ -300,15 +301,15 @@ Then add `minikube` as ID and a description.
 
 ![](/assets/jenkins-secret.png)
 
-The following will give us the cluster url, that will indicate in the `Kubernetes URL` field.
+The following will give us the cluster url, that we need to indicate in the `Kubernetes URL` field.
 ```sh
 kubectl cluster-info | grep master
 ```
 
-After fill out our kubernetes url and our minikube credential, the connection test should be successful.
+After fill out the kubernetes url and minikube credential, the connection test should be successful.
 
-We can see, that the configuration want to default the jenkins url with `http://<NodeIP>:30000` but we want use the node url because the plugin will connect to the master inside the cluster using the port `50000`.
-So, we have to modify three things in our cluster:  
+We can see, that the configuration want to default the jenkins url with `http://<NodeIP>:30000`, it's not what we want. Instead, we will use the node url because the plugin will connect to the master inside the cluster using the port `50000`.
+So to achieve that, we have to modify three things in our cluster:  
 - First, we want our deployment to expose port `50000` and apply it. As we persist the `jenkins_home` folder, there is no worry about deploying a new deployment.
 ```yaml
 apiVersion: apps/v1
