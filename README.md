@@ -63,10 +63,22 @@ chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
 
 #### Why should I need a namespace ?
 
-Namespaces allow isolation in the cluster. We definitely want one in our CI/CD environment. To do so:
+Namespaces allow isolation in the cluster. We definitely want one in our CI/CD environment. To do so, we can use either kubectl command or yaml file:
 
+**Kubectl**
 ```sh
 kubectl create ns jenkins
+```
+
+**yaml**
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jenkins
+```
+```sh
+kubectl apply -f jenkins-namespace.yaml
 ```
 
 Now that we have our namespace, we can proceed with persistency.
